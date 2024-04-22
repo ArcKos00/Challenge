@@ -13,45 +13,49 @@ SortFile(fileName).GetAwaiter().GetResult();
 async Task SortFile(string fileName)
 {
     var files = SplitFile(fileName, 100_000);
-    SortParts(files);
     await MergeParts(files);
 }
 
-IEnumerable<string> SplitFile(string fileName, int partsLineCount)
+string[] SplitFile(string fileName, int partsLineCount)
 {
     var files = new List<string>();
-
-    using var reader = new StreamReader(fileName);
-
     int partNumber = 0;
-    while (!reader.EndOfStream)
+
+    foreach (var batch in Batch(File.ReadLines(fileName), partsLineCount))
     {
         partNumber++;
         var partFileName = "test\\" + partNumber + ".txt";
         files.Add(partFileName);
 
-        using var writer = new StreamWriter(partFileName);
-        for (var i = 0; i < partsLineCount; i++)
-        {
-            if (reader.EndOfStream)
-                break;
+        Array.Sort(batch, 0, batch.Length);
+        File.WriteAllLines(partFileName, batch.Select(s => s.FullLine));
+    }
 
-            writer.WriteLine(reader.ReadLine());
+    return files.ToArray();
+}
+
+IEnumerable<Line[]> Batch(IEnumerable<string> strings, int partLinesCount)
+{
+    var lines = new Line[partLinesCount];
+
+    var counter = 0;
+    foreach (var @string in strings)
+    {
+        lines[counter] = new Line(@string);
+        counter++;
+
+        if (counter == partLinesCount)
+        {
+            yield return lines;
+            counter = 0;
         }
     }
 
-    return files;
-}
-
-void SortParts(IEnumerable<string> files)
-{
-    Parallel.ForEach(files, (file) =>
+    if (counter != 0)
     {
-        var sortedLines = File.ReadAllLines(file)
-            .Select(s => new Line(s))
-            .Order();
-        File.WriteAllLines(file, sortedLines.Select(s => s.FullLine));
-    });
+        Array.Resize(ref lines, counter);
+        yield return lines;
+    }
 }
 
 async Task MergeParts(IEnumerable<string> files)
