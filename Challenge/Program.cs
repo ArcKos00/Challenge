@@ -5,41 +5,41 @@ if (!Directory.Exists("test\\"))
     Directory.CreateDirectory("test\\");
 var fileName = "test\\Challenge.txt";
 var resultFileName = "test\\Result.txt";
-new Generator().Generate(10_000_000, fileName);
+new Generator().Generate(100_000_000, fileName);
 
 using var _ = new Metrics(fileName);
 SortFile(fileName).GetAwaiter().GetResult();
 
 async Task SortFile(string fileName)
 {
-    var files = SplitFile(fileName, 100_000);
-    await MergeParts(files);
+    var files = await SplitFile(fileName, 100_000);
+    await SortResults(files);
 }
 
-string[] SplitFile(string fileName, int partsLineCount)
+async Task<string[]> SplitFile(string fileName, int partsLineCount)
 {
     var files = new List<string>();
     int partNumber = 0;
 
-    foreach (var batch in Batch(File.ReadLines(fileName), partsLineCount))
+    await foreach (var batch in Batch(File.ReadLinesAsync(fileName), partsLineCount))
     {
         partNumber++;
         var partFileName = "test\\" + partNumber + ".txt";
         files.Add(partFileName);
 
         Array.Sort(batch, 0, batch.Length);
-        File.WriteAllLines(partFileName, batch.Select(s => s.FullLine));
+        await File.WriteAllLinesAsync(partFileName, batch.Select(s => s.FullLine));
     }
 
     return files.ToArray();
 }
 
-IEnumerable<Line[]> Batch(IEnumerable<string> strings, int partLinesCount)
+async IAsyncEnumerable<Line[]> Batch(IAsyncEnumerable<string> strings, int partLinesCount)
 {
     var lines = new Line[partLinesCount];
 
     var counter = 0;
-    foreach (var @string in strings)
+    await foreach (var @string in strings)
     {
         lines[counter] = new Line(@string);
         counter++;
@@ -58,7 +58,7 @@ IEnumerable<Line[]> Batch(IEnumerable<string> strings, int partLinesCount)
     }
 }
 
-async Task MergeParts(IEnumerable<string> files)
+async Task SortResults(IEnumerable<string> files)
 {
     var readers = files.Select(s => new StreamReader(s));
 
@@ -74,12 +74,12 @@ async Task MergeParts(IEnumerable<string> files)
             });
         });
 
-        var lines = concurrentReaders.ToList();
+        var lines = concurrentReaders.OrderBy(o => o.Line).ToList();
 
         await using var writer = new StreamWriter(resultFileName);
         while (lines.Count > 0)
         {
-            var current = lines.OrderBy(o => o.Line).First();
+            var current = lines[0];
             await writer.WriteLineAsync(current.Line);
 
             if (current.Reader.EndOfStream)
@@ -89,12 +89,28 @@ async Task MergeParts(IEnumerable<string> files)
             }
 
             current.Line = new Line(await current.Reader.ReadLineAsync());
+            Reorder(ref lines);
         }
     }
     finally
     {
         foreach (var streamReader in readers)
             streamReader.Dispose();
+    }
+}
+
+void Reorder(ref List<LineRead> lines)
+{
+    if (lines.Count == 1)
+        return;
+
+    var i = 0;
+    while (i < lines.Count - 1 && lines[i].Line.CompareTo(lines[i + 1].Line) > 0)
+    {
+        (lines[i], lines[i + 1]) = (lines[i + 1], lines[i]);
+
+        if (++i == lines.Count)
+            return;
     }
 }
 
